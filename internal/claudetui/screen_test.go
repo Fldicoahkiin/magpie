@@ -3,6 +3,7 @@ package claudetui
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -37,6 +38,39 @@ func TestGridDrawsInPlace(t *testing.T) {
 	g.write([]byte("\x1b[2J"))
 	if strings.TrimSpace(g.text()) != "" {
 		t.Fatalf("cleared:\n%s", g.text())
+	}
+}
+
+// What a real Claude Code 2.1.311 drew under NO_COLOR for the trust
+// question and for the Bypass Permissions disclaimer, then for one ↓,
+// which draws ❯ alone where the choice went, reads as No chosen, then Yes.
+func TestGridReadsChoiceMoveWithoutColor(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		yes  *regexp.Regexp
+	}{
+		{"trust", trustYes},
+		{"bypass", bypassYes},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			asked, err := os.ReadFile(filepath.Join("testdata", c.name+"-nocolor-2.1.311.bin"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			down, err := os.ReadFile(filepath.Join("testdata", c.name+"-nocolor-down-2.1.311.bin"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			g := newGrid(screenSize())
+			g.write(asked)
+			if text := g.text(); lastAt(trustNo, text) < 0 || lastAt(c.yes, text) >= 0 {
+				t.Fatalf("asked, want No chosen:\n%s", text)
+			}
+			g.write(down)
+			if text := g.text(); lastAt(c.yes, text) < 0 || lastAt(trustNo, text) >= 0 {
+				t.Fatalf("after ↓, want Yes chosen:\n%s", text)
+			}
+		})
 	}
 }
 

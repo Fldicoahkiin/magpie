@@ -41,13 +41,22 @@ func TestMain(m *testing.M) {
 // its words placed by cursor moves, "No, exit" chosen, and drawn again on
 // No once it listens, the keys before that lost. Enter on No exits.
 // With always, it never listens, as a question whose answer never goes
-// through.
-func fakeTrust(r *bufio.Reader, always bool) {
+// through. With plain, it draws as 2.1.311 does under NO_COLOR: no color,
+// and a move of the choice draws ❯ and the blank it leaves, never the
+// choices' words again (testdata/trust-nocolor-*.bin).
+func fakeTrust(r *bufio.Reader, always, plain bool) {
 	var mu sync.Mutex
 	yes, deaf := false, true
+	marks := map[bool]string{true: "\x1b[38;2;177;185;249m❯\x1b[39m", false: " "}
+	if plain {
+		marks[true] = "❯"
+	}
 	draw := func() {
-		marks := map[bool]string{true: "\x1b[38;2;177;185;249m❯\x1b[39m", false: " "}
 		fmt.Printf("\x1b[2GDo\x1b[5Gyou\x1b[9Gtrust\x1b[15Gthis\x1b[20Gfolder?\r\n\x1b[2G%s\x1b[4GNo,\x1b[8Gexit\r\n\x1b[2G%s\x1b[4GYes,\x1b[9GI\x1b[11Gtrust\x1b[17Gthis\x1b[22Gfolder\r\n", marks[!yes], marks[yes])
+	}
+	// up to No's mark, then Yes's, then back under the question
+	move := func() {
+		fmt.Printf("\x1b[2A\r\x1b[1C%s\r\x1b[1C\x1b[1B%s\r\r\n", marks[!yes], marks[yes])
 	}
 	draw()
 	time.AfterFunc(150*time.Millisecond, func() {
@@ -76,7 +85,11 @@ func fakeTrust(r *bufio.Reader, always bool) {
 		case deaf:
 		case c == 'B' || c == 'A':
 			yes = c == 'B'
-			draw()
+			if plain {
+				move()
+			} else {
+				draw()
+			}
 		case c == '\r' && !yes:
 			os.Exit(1)
 		case c == '\r':
@@ -92,12 +105,21 @@ func fakeTrust(r *bufio.Reader, always bool) {
 // folder hasn't accepted it once (2.1.295): "No, exit" chosen, and drawn
 // again on No once it listens, the keys before that lost. Enter on No
 // exits. With always, it never listens, as a question whose answer never
-// goes through.
-func fakeBypass(r *bufio.Reader, always bool) {
+// goes through. With plain, it draws as 2.1.311 does under NO_COLOR: no
+// color, and a move of the choice draws ❯ and the blank it leaves, never
+// the choices' words again (testdata/bypass-nocolor-*.bin).
+func fakeBypass(r *bufio.Reader, always, plain bool) {
 	var mu sync.Mutex
 	yes, deaf := false, true
+	marks := map[bool]string{true: "\x1b[38;2;177;185;249m❯\x1b[39m", false: " "}
+	if plain {
+		marks[true] = "❯"
+	}
+	// up to No's mark, then Yes's, then back under the question
+	move := func() {
+		fmt.Printf("\x1b[4A\x1b[2G%s\x1b[1B\x1b[2G%s\x1b[3B\r", marks[!yes], marks[yes])
+	}
 	draw := func() {
-		marks := map[bool]string{true: "\x1b[38;2;177;185;249m❯\x1b[39m", false: " "}
 		fmt.Printf("\x1b[2J\x1b[H───── WARNING: Claude Code running in Bypass\x1b[1CPermissions\x1b[1Cmode\r\n\r\nIn\x1b[1CBypass\x1b[1CPermissions\x1b[1Cmode,\x1b[1CClaude\x1b[1CCode\x1b[1Cwill\x1b[1Cnot\x1b[1Cask\r\nfor\x1b[1Cyour\x1b[1Capproval\x1b[1Cbefore\x1b[1Crunning\x1b[1Cpotentially\r\ndangerous\x1b[1Ccommands.\r\n\r\n\x1b[2G%s\x1b[4GNo,\x1b[8Gexit\r\n\x1b[2G%s\x1b[4GYes,\x1b[9GI\x1b[11Gaccept\r\n\r\n Enter to confirm · Esc to cancel\r\n", marks[!yes], marks[yes])
 	}
 	draw()
@@ -127,7 +149,11 @@ func fakeBypass(r *bufio.Reader, always bool) {
 		case deaf:
 		case c == 'B' || c == 'A':
 			yes = c == 'B'
-			draw()
+			if plain {
+				move()
+			} else {
+				draw()
+			}
 		case c == '\r' && !yes:
 			os.Exit(1)
 		case c == '\r':
@@ -232,10 +258,10 @@ func fakeClaude(args []string) {
 		fakeOnboard(r, v)
 	}
 	if v := os.Getenv("FAKE_TRUST"); v != "" {
-		fakeTrust(r, v == "deaf")
+		fakeTrust(r, v == "deaf", v == "plain")
 	}
 	if v := os.Getenv("FAKE_BYPASS"); v != "" {
-		fakeBypass(r, v == "deaf")
+		fakeBypass(r, v == "deaf", v == "plain")
 	}
 	// what it was started with, for the test to read
 	_ = os.WriteFile(filepath.Join(os.Getenv("CLAUDE_CONFIG_DIR"), "args"), []byte(strings.Join(args, "\n")), 0o600)
@@ -793,6 +819,17 @@ func TestShimTrustsWhenTold(t *testing.T) {
 	}
 }
 
+// Under NO_COLOR, ↓ redraws only ❯, so the stream never says "❯ Yes, I
+// trust": the helper pressed ↓ once a second and the /usage read and the
+// bridge's run waited out their caller on the question (magpie started
+// with NO_COLOR=1, macOS, Claude Code 2.1.311).
+func TestShimTrustsWithoutColor(t *testing.T) {
+	out := runShim(t, []string{"FAKE_TRUST=plain", TrustEnv + "=1"}, append([]string{fakePath(t)}, pArgs...), []string{"hello"}, 3)
+	if out[0]["subtype"] != "init" || out[1]["type"] != "assistant" {
+		t.Fatalf("got %v, want an interactive turn", out)
+	}
+}
+
 // The Bypass Permissions disclaimer, drawn where the claude magpie spawns
 // runs with --dangerously-skip-permissions (the user's claude may be a
 // wrapper that adds it, #5042) and the config folder hasn't accepted it
@@ -801,6 +838,15 @@ func TestShimTrustsWhenTold(t *testing.T) {
 // that folder's settings.json and the next run is shown none of it.
 func TestShimAcceptsBypassDisclaimer(t *testing.T) {
 	out := runShim(t, []string{"FAKE_BYPASS=1", BypassEnv + "=1"}, append([]string{fakePath(t)}, pArgs...), []string{"hello"}, 3)
+	if out[0]["subtype"] != "init" || out[1]["type"] != "assistant" {
+		t.Fatalf("got %v, want an interactive turn", out)
+	}
+}
+
+// The disclaimer moves its choice as the trust question does: under
+// NO_COLOR, ↓ redraws only ❯, never "❯ Yes, I accept" (2.1.311).
+func TestShimAcceptsBypassDisclaimerWithoutColor(t *testing.T) {
+	out := runShim(t, []string{"FAKE_BYPASS=plain", BypassEnv + "=1"}, append([]string{fakePath(t)}, pArgs...), []string{"hello"}, 3)
 	if out[0]["subtype"] != "init" || out[1]["type"] != "assistant" {
 		t.Fatalf("got %v, want an interactive turn", out)
 	}

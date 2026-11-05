@@ -278,9 +278,17 @@ this change it was a 502, which a Claude Code client (paseo) asked again
 with backoff, so the chat hung (lwjef on X).
 `TestClaudeTUIUntrustedFolderAnswered` holds it. The question opens on "No, exit", and a key
 sent as it is first drawn can be lost to its being drawn again, so the
-helper presses ↓ until "Yes" is the last choice drawn and Enter only once
-it has stayed so for 300ms (`ready`, `trustSettle`). Pressing Enter blind
-chose "No, exit" in the real gateway, and no run started.
+helper presses ↓ until the screen (`grid`) shows "Yes" chosen and Enter
+only once it has stayed so for 300ms (`ready`, `trustSettle`). Pressing
+Enter blind chose "No, exit" in the real gateway, and no run started. The
+choice is read off the screen, not the stream: under `NO_COLOR`, Claude
+Code 2.1.311 draws only ❯ where the choice moves, so a stream read never
+saw "Yes" chosen and pressed ↓ once a second until the caller's deadline
+(`TestShimTrustsWithoutColor`, `TestGridReadsChoiceMoveWithoutColor`).
+The Bypass Permissions disclaimer, told yes where `claudetui.BypassEnv`
+says so (#5042), opens on the same "No, exit" and moves its choice the
+same way, so the same code answers it, its choice read off the screen too
+(`TestShimAcceptsBypassDisclaimerWithoutColor`).
 
 Every run is `-p` only when Settings › Models › Replies › Claude Code's
 interactive mode is Off (`claudePrintMode`), or in the gateway's own

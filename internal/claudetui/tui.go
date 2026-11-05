@@ -540,12 +540,17 @@ func (s *shim) ready() error {
 				return err
 			}
 		case (strings.Contains(p, "trust this folder") || strings.Contains(words, "Bypass Permissions mode")) && answered < 3:
-			// the choice is the last one drawn after ❯, "No, exit" at
-			// first. A key sent as the question is first drawn can be lost
-			// to its being drawn again on No, so Enter goes only to a Yes
-			// drawn trustSettle ago and not drawn over since.
-			no, yes := lastAt(trustNo, p), lastAt(trustYes, p)
-			if b := lastAt(bypassYes, p); b > yes {
+			// the choice is the one ❯ points at on the screen as it is
+			// (grid), "No, exit" at first. The stream misses a move: with
+			// NO_COLOR, Claude Code 2.1.311 draws ❯ alone where the choice
+			// goes, never "❯ Yes, I trust", and ↓ was pressed once a second
+			// until the caller's deadline. A key sent as the question is
+			// first drawn can be lost to its being drawn again on No, so
+			// Enter goes only to a Yes shown trustSettle ago and not moved
+			// off since.
+			screen, _ := s.looks()
+			no, yes := lastAt(trustNo, screen), lastAt(trustYes, screen)
+			if b := lastAt(bypassYes, screen); b > yes {
 				yes = b
 			}
 			switch {
